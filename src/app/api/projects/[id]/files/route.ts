@@ -2,6 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { ProjectStore } from "@/core/storage/project_store";
 import * as fs from "fs";
 import * as path from "path";
+import {
+  getRepoCacheDir,
+  getAllPossibleRepoDirs,
+  isDemoRepoPath,
+  ensureDemoRepoOnDisk,
+  getDemoFile,
+} from "@/core/utils/repo_cache";
+import { EMBEDDED_DEMO_FILES } from "@/engine/embedded_demo_repo";
 
 export async function GET(
   request: NextRequest,
@@ -19,20 +27,79 @@ export async function GET(
     const { searchParams } = new URL(request.url);
     const requestedFile = searchParams.get("file");
 
-    // Resolve repository base directory
-    let rawPath = project.repository.urlOrPath.trim();
+    const rawPath = (project.repository.urlOrPath || "").trim();
+    const isDemo = isDemoRepoPath(rawPath) || isDemoRepoPath(project.name);
+
+    // 1. Handle Seeded CampusBuddy Banking Project (Virtual & On-Disk)
+    if (isDemo) {
+      if (requestedFile) {
+        // Direct in-memory lookup first
+        const embedded = getDemoFile(requestedFile);
+        if (embedded) {
+          return NextResponse.json({
+            status: "SUCCESS",
+            file: requestedFile,
+            content: embedded.content,
+            lineCount: embedded.content.split("\n").length,
+          });
+        }
+
+        // Try reading from disk fallback
+        const diskPath = ensureDemoRepoOnDisk();
+        const diskFile = path.join(diskPath, requestedFile);
+        if (fs.existsSync(diskFile) && fs.statSync(diskFile).isFile()) {
+          const content = fs.readFileSync(diskFile, "utf-8");
+          return NextResponse.json({
+            status: "SUCCESS",
+            file: requestedFile,
+            content,
+            lineCount: content.split("\n").length,
+          });
+        }
+
+        return NextResponse.json({ status: "ERROR", message: "File not found" }, { status: 404 });
+      }
+
+      // Return complete demo file tree
+      const demoFiles: Array<{ path: string; name: string; isDir: boolean; size: number }> = [
+        { path: "services", name: "services", isDir: true, size: 0 },
+        { path: "docs", name: "docs", isDir: true, size: 0 },
+        { path: "telemetry", name: "telemetry", isDir: true, size: 0 },
+      ];
+
+      for (const f of EMBEDDED_DEMO_FILES) {
+        demoFiles.push({
+          path: f.relativePath,
+          name: path.basename(f.relativePath),
+          isDir: false,
+          size: Buffer.byteLength(f.content, "utf-8"),
+        });
+      }
+
+      demoFiles.sort((a, b) => {
+        if (a.isDir === b.isDir) return a.path.localeCompare(b.path);
+        return a.isDir ? -1 : 1;
+      });
+
+      return NextResponse.json({
+        status: "SUCCESS",
+        root: project.name,
+        files: demoFiles,
+      });
+    }
+
+    // 2. Handle Arbitrary Local and Remote Repositories
     let repoBase = "";
-
     const isRemoteUrl = /^https?:\/\//i.test(rawPath) || /^git@/i.test(rawPath);
-    const localDirect = fs.existsSync(rawPath) ? rawPath : (fs.existsSync(path.resolve(process.cwd(), rawPath)) ? path.resolve(process.cwd(), rawPath) : "");
+    const safeRepoName = rawPath.replace(/https?:\/\/github\.com\//i, "").replace(/[^a-zA-Z0-9_.-]/g, "_").replace(/\.git$/, "");
 
-    if (localDirect) {
-      repoBase = localDirect;
-    } else if (isRemoteUrl || /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(rawPath)) {
-      const safeRepoName = rawPath.replace(/https?:\/\/github\.com\//i, "").replace(/[^a-zA-Z0-9_.-]/g, "_").replace(/\.git$/, "");
-      repoBase = path.resolve(process.cwd(), ".temp_repos", safeRepoName);
-    } else {
-      repoBase = path.resolve(process.cwd(), rawPath);
+    const candidates = getAllPossibleRepoDirs(safeRepoName);
+    if (fs.existsSync(rawPath)) {
+      candidates.unshift(rawPath);
+    }
+    const cwdDirect = path.resolve(process.cwd(), rawPath);
+    if (fs.existsSync(cwdDirect)) {
+      candidates.unshift(cwdDirect);
     }
 
     const hasValidFiles = (dirPath: string) => {
@@ -45,24 +112,31 @@ export async function GET(
       }
     };
 
-    if (!hasValidFiles(repoBase)) {
+    for (const cand of candidates) {
+      if (hasValidFiles(cand)) {
+        repoBase = cand;
+        break;
+      }
+    }
+
+    if (!repoBase || !hasValidFiles(repoBase)) {
       if (project.name.toLowerCase().includes("vantair") || rawPath.toLowerCase().includes("vantair")) {
         repoBase = process.cwd();
       } else {
-        const tempDir = path.resolve(process.cwd(), ".temp_repos");
-        if (fs.existsSync(tempDir)) {
-          const matching = fs.readdirSync(tempDir).find((d) => {
-            const p = path.join(tempDir, d);
+        const cacheDir = getRepoCacheDir();
+        if (fs.existsSync(cacheDir)) {
+          const matching = fs.readdirSync(cacheDir).find((d) => {
+            const p = path.join(cacheDir, d);
             return d.toLowerCase().includes(project.name.toLowerCase()) && hasValidFiles(p);
           });
           if (matching) {
-            repoBase = path.join(tempDir, matching);
+            repoBase = path.join(cacheDir, matching);
           }
         }
       }
     }
 
-    if (!hasValidFiles(repoBase)) {
+    if (!repoBase || !hasValidFiles(repoBase)) {
       repoBase = process.cwd();
     }
 
@@ -101,6 +175,7 @@ export async function GET(
             entry.name === ".next" ||
             entry.name === ".turbo" ||
             entry.name === ".temp_repos" ||
+            entry.name === "vantair_repos" ||
             entry.name === ".agents" ||
             entry.name === ".claude" ||
             entry.name === ".gemini" ||

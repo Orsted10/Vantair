@@ -10,6 +10,7 @@
     "lint": "next lint",
     "test:engine": "npx ts-node --compiler-options \"{\\\"module\\\":\\\"CommonJS\\\"}\" tests/phases_1_to_20_verification.ts",
     "test:arbitrary": "npx ts-node --compiler-options \"{\\\"module\\\":\\\"CommonJS\\\"}\" tests/arbitrary_repo_ingestion_test.ts",
+    "test:serverless": "npx ts-node --compiler-options \"{\\\"module\\\":\\\"CommonJS\\\"}\" tests/verify_serverless_ingestion.ts",
     "test:reality": "npx ts-node --compiler-options \"{\\\"module\\\":\\\"CommonJS\\\"}\" tests/reality_engine_waves_test.ts",
     "report": "npx ts-node --compiler-options \"{\\\"module\\\":\\\"CommonJS\\\"}\" scripts/generate_build_report.ts"
   },

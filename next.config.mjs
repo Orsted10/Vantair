@@ -2,6 +2,9 @@
 const nextConfig = {
   reactStrictMode: true,
   serverExternalPackages: ["typescript"],
+  outputFileTracingIncludes: {
+    "/*": ["./src/demo_repo/**/*"],
+  },
   webpack: (config, { isServer }) => {
     if (!isServer) {
       config.resolve.fallback = {

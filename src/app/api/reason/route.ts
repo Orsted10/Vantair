@@ -4,6 +4,13 @@ import { ProjectStore } from "@/core/storage/project_store";
 import { ModelStore } from "@/core/storage/model_store";
 import * as fs from "fs";
 import * as path from "path";
+import {
+  getRepoCacheDir,
+  getAllPossibleRepoDirs,
+  isDemoRepoPath,
+  ensureDemoRepoOnDisk,
+  getDemoFile,
+} from "@/core/utils/repo_cache";
 
 export async function POST(request: NextRequest) {
   try {
@@ -19,50 +26,69 @@ export async function POST(request: NextRequest) {
     const project = projectId ? projectStore.getProject(projectId) : undefined;
     const snapshot = projectId ? modelStore.getLatestSnapshotForProject(projectId) : undefined;
 
-    // Locate repository base directory on disk
-    let repoBase = "";
-    if (project?.repository?.urlOrPath) {
-      const rawPath = project.repository.urlOrPath.trim();
-      const localDirect = fs.existsSync(rawPath) ? rawPath : (fs.existsSync(path.resolve(process.cwd(), rawPath)) ? path.resolve(process.cwd(), rawPath) : "");
-      if (localDirect) {
-        repoBase = localDirect;
-      } else {
-        const safeRepoName = rawPath.replace(/https?:\/\/github\.com\//i, "").replace(/[^a-zA-Z0-9_.-]/g, "_").replace(/\.git$/, "");
-        const candidate = path.resolve(process.cwd(), ".temp_repos", safeRepoName);
-        if (fs.existsSync(candidate)) {
-          repoBase = candidate;
-        } else {
-          const tempDir = path.resolve(process.cwd(), ".temp_repos");
-          if (fs.existsSync(tempDir)) {
-            const matching = fs.readdirSync(tempDir).find(d => d.toLowerCase().includes((project.name || "").toLowerCase()));
-            if (matching) {
-              repoBase = path.join(tempDir, matching);
-            }
-          }
-        }
-      }
-    }
+    const rawPath = (project?.repository?.urlOrPath || "").trim();
+    const isDemo = isDemoRepoPath(rawPath) || isDemoRepoPath(project?.name || "");
 
-    // Read real code excerpts from primary files if repoBase found
     let codeExcerpts = "";
-    if (repoBase && fs.existsSync(repoBase)) {
-      const candidateFiles = [
-        "src/lib/groq.ts",
-        "src/app/api/ai/quest/route.ts",
-        "src/app/api/ai/generate/route.ts",
-        "src/app/api/verify/route.ts",
-        "src/app/page.tsx",
-        "package.json",
+
+    if (isDemo) {
+      // Seeded Banking Microservices excerpts
+      const demoCandidateFiles = [
+        "services/RefundOrchestrator.ts",
+        "services/PaymentGateway.ts",
+        "services/OrderService.ts",
+        "services/PostgresDB.ts",
+        "services/RedisCache.ts",
+        "docs/ADR-042-refunds.md",
       ];
 
-      for (const relFile of candidateFiles) {
-        const full = path.join(repoBase, relFile);
-        if (fs.existsSync(full) && fs.statSync(full).isFile()) {
-          try {
-            const lines = fs.readFileSync(full, "utf-8").split("\n").slice(0, 45).join("\n");
-            codeExcerpts += `\n--- File: ${relFile} ---\n${lines}\n`;
-            if (codeExcerpts.length > 3000) break;
-          } catch {}
+      for (const relFile of demoCandidateFiles) {
+        const embedded = getDemoFile(relFile);
+        if (embedded) {
+          const lines = embedded.content.split("\n").slice(0, 50).join("\n");
+          codeExcerpts += `\n--- File: ${relFile} ---\n${lines}\n`;
+        }
+      }
+    } else {
+      // Locate repository base directory on disk for arbitrary projects
+      let repoBase = "";
+      const safeRepoName = rawPath.replace(/https?:\/\/github\.com\//i, "").replace(/[^a-zA-Z0-9_.-]/g, "_").replace(/\.git$/, "");
+      const candidates = getAllPossibleRepoDirs(safeRepoName);
+
+      if (fs.existsSync(rawPath)) {
+        candidates.unshift(rawPath);
+      }
+      const cwdDirect = path.resolve(process.cwd(), rawPath);
+      if (fs.existsSync(cwdDirect)) {
+        candidates.unshift(cwdDirect);
+      }
+
+      for (const cand of candidates) {
+        if (fs.existsSync(cand) && fs.statSync(cand).isDirectory()) {
+          repoBase = cand;
+          break;
+        }
+      }
+
+      if (repoBase && fs.existsSync(repoBase)) {
+        const candidateFiles = [
+          "src/lib/groq.ts",
+          "src/app/api/ai/quest/route.ts",
+          "src/app/api/ai/generate/route.ts",
+          "src/app/api/verify/route.ts",
+          "src/app/page.tsx",
+          "package.json",
+        ];
+
+        for (const relFile of candidateFiles) {
+          const full = path.join(repoBase, relFile);
+          if (fs.existsSync(full) && fs.statSync(full).isFile()) {
+            try {
+              const lines = fs.readFileSync(full, "utf-8").split("\n").slice(0, 45).join("\n");
+              codeExcerpts += `\n--- File: ${relFile} ---\n${lines}\n`;
+              if (codeExcerpts.length > 3000) break;
+            } catch {}
+          }
         }
       }
     }
@@ -70,12 +96,12 @@ export async function POST(request: NextRequest) {
     // Assemble rich ground-truth context
     const enrichedContext = {
       projectId: project?.id || projectId,
-      projectName: project?.name || incidentContext.repoName || "TaskMesh",
+      projectName: project?.name || incidentContext.repoName || (isDemo ? "CampusBuddy Banking" : "Vantair Reality Engine"),
       description: project?.description || "High-performance software reality substrate",
       repoPath: project?.repository?.urlOrPath || "local",
-      languages: snapshot?.metadata?.languages || { TypeScript: "77.7%", Rust: "14.2%" },
-      totalFiles: snapshot?.metadata?.totalFiles || snapshot?.entities?.length || 109,
-      totalLines: snapshot?.metadata?.totalLinesOfCode || (snapshot?.stats as any)?.linesOfCode || 24726,
+      languages: snapshot?.metadata?.languages || (isDemo ? { TypeScript: "85.4%", Markdown: "10.2%", JSON: "4.4%" } : { TypeScript: "77.7%", Rust: "14.2%" }),
+      totalFiles: snapshot?.metadata?.totalFiles || snapshot?.entities?.length || (isDemo ? 7 : 109),
+      totalLines: snapshot?.metadata?.totalLinesOfCode || (snapshot?.stats as any)?.linesOfCode || (isDemo ? 219 : 24726),
       dependencies: snapshot?.metadata?.dependencies || [],
       contracts: (snapshot?.contracts && snapshot.contracts.length > 0)
         ? snapshot.contracts.map((c: any) => ({
@@ -83,6 +109,12 @@ export async function POST(request: NextRequest) {
             specLocation: c.specLocation,
             invariants: c.invariants,
           }))
+        : isDemo
+        ? [
+            { endpoint: "RefundOrchestrator.executeRefund", specLocation: "services/RefundOrchestrator.ts", invariants: ["LTL Law 01: G (refund_amount <= total_order_paid)", "LTL Law 02: G (timeout -> Next(idempotent_retry))"] },
+            { endpoint: "PaymentGateway.requestGatewayRefund", specLocation: "services/PaymentGateway.ts" },
+            { endpoint: "OrderService.processOrderRefund", specLocation: "services/OrderService.ts" },
+          ]
         : [
             { endpoint: "POST /api/ai/quest", specLocation: "src/app/api/ai/quest/route.ts" },
             { endpoint: "POST /api/ai/generate", specLocation: "src/app/api/ai/generate/route.ts" },
