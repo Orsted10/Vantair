@@ -1,0 +1,44 @@
+[
+  {
+    "traceId": "tr_412_001",
+    "spanId": "sp_01",
+    "service": "RefundOrchestrator",
+    "operation": "executeRefund",
+    "orderId": "ord_9901",
+    "userId": "usr_7712",
+    "amount": 250.00,
+    "status": "DUPLICATE_CAPTURE_DETECTED",
+    "gatewayLatencyMs": 4620,
+    "idempotencyKeyPresent": false,
+    "retryCount": 1,
+    "timestamp": 1772870400000
+  },
+  {
+    "traceId": "tr_412_002",
+    "spanId": "sp_02",
+    "service": "RefundOrchestrator",
+    "operation": "executeRefund",
+    "orderId": "ord_9902",
+    "userId": "usr_8834",
+    "amount": 180.50,
+    "status": "DUPLICATE_CAPTURE_DETECTED",
+    "gatewayLatencyMs": 4810,
+    "idempotencyKeyPresent": false,
+    "retryCount": 1,
+    "timestamp": 1772870405000
+  },
+  {
+    "traceId": "tr_412_003",
+    "spanId": "sp_03",
+    "service": "RefundOrchestrator",
+    "operation": "executeRefund",
+    "orderId": "ord_9903",
+    "userId": "usr_1042",
+    "amount": 500.00,
+    "status": "DUPLICATE_CAPTURE_DETECTED",
+    "gatewayLatencyMs": 4550,
+    "idempotencyKeyPresent": false,
+    "retryCount": 1,
+    "timestamp": 1772870410000
+  }
+]
