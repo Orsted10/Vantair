@@ -163,5 +163,14 @@ export interface SystemModelSnapshot {
     dependencies: Array<{ name: string; version: string; isDev: boolean; license?: string }>;
     stars?: string;
     forks?: string;
+    architectureSummary?: string;
+    recommendations?: Array<{
+      title: string;
+      priority: "HIGH" | "CRITICAL" | "MEDIUM";
+      targetFile?: string;
+      explanation: string;
+      proposedFix?: string;
+    }>;
+    hardware?: string;
   };
 }

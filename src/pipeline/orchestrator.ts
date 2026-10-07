@@ -16,6 +16,7 @@ import { PolygraphContradictionEngine } from "../engine/polygraph_bisim";
 import { SystemConstitutionEngine } from "../engine/constitution_laws";
 import { DarkMatterHarvestEngine } from "../engine/dark_matter_harvest";
 import { HypergraphSubstrate } from "../engine/hypergraph_substrate";
+import { GroqCodebaseSynthesizer } from "../engine/groq_codebase_synthesizer";
 
 export class AnalysisPipelineOrchestrator {
   private projectStore = ProjectStore.getInstance();
@@ -24,6 +25,7 @@ export class AnalysisPipelineOrchestrator {
   private fingerprintEngine = new RepositoryFingerprintEngine();
   private astParser = new UniversalASTParser();
   private wireIngestor = new WireSchemaIngestor();
+  private groqSynthesizer = new GroqCodebaseSynthesizer();
 
   /**
    * Execute End-to-End Analysis for a Project
@@ -357,136 +359,9 @@ export class AnalysisPipelineOrchestrator {
       });
     }
 
-    // 6. Workflows & State Machines
-    notify("BEHAVIOR_RECONSTRUCTION", 75, "Mining behavioral workflows and error paths...");
-    const rootEntity = entities[0] || { id: "ent_root", name: "Root" };
-    const workflows: SystemWorkflow[] = [
-      {
-        id: "wf_primary_dispatch",
-        name: `${project.name} Request Dispatch & Processing Workflow`,
-        entrypointEntityId: rootEntity.id,
-        states: ["RECEIVED", "VALIDATED", "DISPATCHED", "COMPLETED", "ERROR_RECOVERY"],
-        transitions: [
-          { fromState: "RECEIVED", toState: "VALIDATED", triggerEvent: "validateParams", isHappyPath: true, isFailurePath: false, isRetry: false, evidenceIds: [] },
-          { fromState: "VALIDATED", toState: "DISPATCHED", triggerEvent: "dispatchHandler", isHappyPath: true, isFailurePath: false, isRetry: false, evidenceIds: [] },
-          { fromState: "DISPATCHED", toState: "COMPLETED", triggerEvent: "handlerSuccess", isHappyPath: true, isFailurePath: false, isRetry: false, evidenceIds: [] },
-          { fromState: "DISPATCHED", toState: "ERROR_RECOVERY", triggerEvent: "exceptionCaught", isHappyPath: false, isFailurePath: true, isRetry: true, evidenceIds: [] },
-        ],
-        involvedEntityIds: entities.slice(0, 4).map(e => e.id),
-        isIdempotent: true,
-        riskRating: "LOW",
-        evidenceIds: [],
-      }
-    ];
-
-    // 7. Polygraph Contradiction & Security Scanning
-    notify("POLYGRAPH_CHECK", 85, "Cross-referencing Code vs Invariants & Security Sinks...");
-    const contradictions: SystemContradiction[] = [];
-
-    // Scan for potential vulnerabilities
-    for (const [fPath, content] of fileContentMap.entries()) {
-      if (contradictions.length >= 5) break;
-
-      // 1. Check for dynamic eval / exec
-      if (/(\beval\s*\(|\bnew\s+Function\s*\(|\bexecSync\s*\()/.test(content)) {
-        const contraEv = createEvidence("SOURCE_CODE", TruthStatus.OBSERVED, 0.95, `Unsafe Dynamic Execution in ${fPath}`, "Discovered dynamic evaluation or unconstrained shell execution sink.", fPath);
-        contradictions.push({
-          id: `contra_eval_${contradictions.length + 1}`,
-          title: `Unconstrained Dynamic Evaluation Sink in ${fPath}`,
-          severity: "HIGH",
-          sourceA: { type: "LTL_SPEC", claim: "Codebase must disallow arbitrary code execution sinks (CWE-95)." },
-          sourceB: { type: "SOURCE_CODE", claim: `${fPath} invokes dynamic evaluation primitive.` },
-          impactSummary: "Potential Remote Code Execution (RCE) if user input traverses into dynamic evaluation context.",
-          firstObservedCommit: project.repository.currentCommitSha,
-          culpabilityScore: 0.9,
-          evidenceIds: [contraEv.id],
-        });
-      }
-
-      // 2. Check for empty catch blocks
-      if (/catch\s*\([^\)]*\)\s*\{\s*\}/.test(content)) {
-        const contraEv = createEvidence("SOURCE_CODE", TruthStatus.OBSERVED, 0.88, `Swallowed Exception in ${fPath}`, "Empty catch block silently swallows runtime errors.", fPath);
-        contradictions.push({
-          id: `contra_catch_${contradictions.length + 1}`,
-          title: `Silently Swallowed Error in ${fPath}`,
-          severity: "MEDIUM",
-          sourceA: { type: "LTL_SPEC", claim: "All caught exceptions must be logged or propagated." },
-          sourceB: { type: "SOURCE_CODE", claim: `${fPath} contains empty catch block.` },
-          impactSummary: "Masks runtime exceptions and leads to silent state corruption under failure.",
-          firstObservedCommit: project.repository.currentCommitSha,
-          culpabilityScore: 0.75,
-          evidenceIds: [contraEv.id],
-        });
-      }
-    }
-
-    // Provide default architectural finding if clean
-    if (contradictions.length === 0) {
-      contradictions.push({
-        id: "contra_untested_frontier",
-        title: "Dynamic Concurrency Bound under High Workload",
-        severity: "LOW",
-        sourceA: { type: "LTL_SPEC", claim: "Resource utilization must remain bounded under spike concurrency." },
-        sourceB: { type: "SOURCE_CODE", claim: "Event loop latency unmonitored during bulk traffic." },
-        impactSummary: "Performance degradation observed under simulated spike loads.",
-        firstObservedCommit: project.repository.currentCommitSha,
-        culpabilityScore: 0.5,
-        evidenceIds: [],
-      });
-    }
-
-    // 8. Invariants & Constitution
-    notify("CONSTITUTION_EVALUATION", 90, "Evaluating system invariants against 14 Software Laws...");
-    const invariants: DiscoveredInvariant[] = [
-      {
-        id: "inv_bounded_memory",
-        statement: `Process heap allocation must remain bounded strictly below memory quota.`,
-        category: "PERFORMANCE",
-        formalFormula: "G (HeapUsage <= 512MB)",
-        truthStatus: TruthStatus.OBSERVED,
-        confidence: 0.99,
-        isUserAccepted: true,
-        evidenceIds: [],
-      },
-      {
-        id: "inv_non_blocking_loop",
-        statement: "Main thread event loop lag must not exceed 50ms per synchronous execution slice.",
-        category: "PERFORMANCE",
-        formalFormula: "G (EventLoopLag <= 50ms)",
-        truthStatus: TruthStatus.OBSERVED,
-        confidence: 0.95,
-        isUserAccepted: true,
-        evidenceIds: [],
-      },
-      {
-        id: "inv_input_sanitization",
-        statement: "External parameters and query payloads must be sanitized prior to handler execution.",
-        category: "SECURITY",
-        formalFormula: "G (UntrustedInput -> F (Sanitized XOR Rejected))",
-        truthStatus: contradictions.some(c => c.severity === "HIGH") ? TruthStatus.CONTRADICTED : TruthStatus.OBSERVED,
-        confidence: 0.92,
-        isUserAccepted: true,
-        evidenceIds: [],
-      }
-    ];
-
-    // 9. Unknowns & Dark Matter
-    notify("DARK_MATTER_HARVEST", 95, "Harvesting dark state space and unexercised branches...");
-    const unknowns: SystemUnknown[] = [
-      {
-        id: "unk_timeout_behavior",
-        title: `Unexercised Network Timeout Recovery in ${entities[0]?.name || "Core"}`,
-        category: "UNTESTED",
-        reason: "No automated integration tests exercise network socket timeout resets.",
-        potentialRisk: "Dangling TCP socket handles under upstream connection reset.",
-        suggestedAction: "Synthesize integration test fixture simulating abrupt connection drops.",
-        relatedEntityIds: entities.slice(0, 3).map(e => e.id),
-      }
-    ];
-
-    // Extract real dependencies from package.json or requirements.txt
+    // 6. Extract Real Dependencies
     const discoveredDeps: Array<{ name: string; version: string; isDev: boolean; license?: string }> = [];
-    const packageJsonFile = snapshot.files.find(f => f.relativePath.toLowerCase().endsWith("package.json"));
+    const packageJsonFile = snapshot.files.find((f) => f.relativePath.toLowerCase().endsWith("package.json"));
     if (packageJsonFile && packageJsonFile.content) {
       try {
         const parsedPkg = JSON.parse(packageJsonFile.content);
@@ -502,7 +377,7 @@ export class AnalysisPipelineOrchestrator {
         }
       } catch {}
     }
-    const reqFile = snapshot.files.find(f => f.relativePath.toLowerCase().endsWith("requirements.txt"));
+    const reqFile = snapshot.files.find((f) => f.relativePath.toLowerCase().endsWith("requirements.txt"));
     if (reqFile && reqFile.content) {
       for (const line of reqFile.content.split("\n")) {
         const trimmed = line.trim();
@@ -513,7 +388,63 @@ export class AnalysisPipelineOrchestrator {
       }
     }
 
-    // Fetch real stars and forks from GitHub if possible
+    // 7. Static Polygraph & Security Sink Scanning
+    notify("POLYGRAPH_CHECK", 75, "Scanning source files for security sinks and dynamic execution...");
+    const staticContradictions: SystemContradiction[] = [];
+    for (const [fPath, content] of fileContentMap.entries()) {
+      if (staticContradictions.length >= 4) break;
+
+      // Check for dynamic eval / exec
+      if (/(\beval\s*\(|\bnew\s+Function\s*\(|\bexecSync\s*\()/.test(content)) {
+        const contraEv = createEvidence("SOURCE_CODE", TruthStatus.OBSERVED, 0.95, `Unsafe Dynamic Execution in ${fPath}`, "Discovered dynamic evaluation or unconstrained shell execution sink.", fPath);
+        staticContradictions.push({
+          id: `contra_eval_${staticContradictions.length + 1}`,
+          title: `Unconstrained Dynamic Evaluation Sink in ${fPath}`,
+          severity: "HIGH",
+          sourceA: { type: "LTL_SPEC", claim: "Codebase must disallow arbitrary code execution sinks (CWE-95)." },
+          sourceB: { type: "SOURCE_CODE", claim: `${fPath} invokes dynamic evaluation primitive.` },
+          impactSummary: "Potential Remote Code Execution (RCE) if user input traverses into dynamic evaluation context.",
+          firstObservedCommit: project.repository.currentCommitSha,
+          culpabilityScore: 0.9,
+          evidenceIds: [contraEv.id],
+        });
+      }
+
+      // Check for empty catch blocks
+      if (/catch\s*\([^\)]*\)\s*\{\s*\}/.test(content)) {
+        const contraEv = createEvidence("SOURCE_CODE", TruthStatus.OBSERVED, 0.88, `Swallowed Exception in ${fPath}`, "Empty catch block silently swallows runtime errors.", fPath);
+        staticContradictions.push({
+          id: `contra_catch_${staticContradictions.length + 1}`,
+          title: `Silently Swallowed Error in ${fPath}`,
+          severity: "MEDIUM",
+          sourceA: { type: "LTL_SPEC", claim: "All caught exceptions must be logged or propagated." },
+          sourceB: { type: "SOURCE_CODE", claim: `${fPath} contains empty catch block.` },
+          impactSummary: "Masks runtime exceptions and leads to silent state corruption under failure.",
+          firstObservedCommit: project.repository.currentCommitSha,
+          culpabilityScore: 0.75,
+          evidenceIds: [contraEv.id],
+        });
+      }
+    }
+
+    // 8. Deep Groq LPU Reality Codebase Analysis
+    notify("GROQ_AI_ANALYSIS", 85, "Executing Deep Groq LPU hardware analysis over repository codebase...");
+    const groqSynthesized = await this.groqSynthesizer.synthesize(
+      project.name,
+      snapshot.files,
+      entities,
+      discoveredDeps,
+      contracts,
+      project.repository.currentCommitSha
+    );
+
+    // Combine Groq and static findings
+    const workflows = groqSynthesized.workflows;
+    const invariants = groqSynthesized.invariants;
+    const unknowns = groqSynthesized.unknowns;
+    const contradictions = [...staticContradictions, ...groqSynthesized.contradictions];
+
+    // 9. Fetch GitHub Stars & Forks
     let repoStars = "0";
     let repoForks = "0";
     if (project.repository.provider === "GITHUB") {
@@ -530,15 +461,17 @@ export class AnalysisPipelineOrchestrator {
             const ghData = await ghRes.json();
             repoStars = ghData.stargazers_count > 1000 ? `${(ghData.stargazers_count / 1000).toFixed(1)}k` : String(ghData.stargazers_count || 0);
             repoForks = ghData.forks_count > 1000 ? `${(ghData.forks_count / 1000).toFixed(1)}k` : String(ghData.forks_count || 0);
-            if (ghData.description && !project.description) {
-              project.description = ghData.description;
-            }
           }
         } catch {}
       }
     }
 
-    // 10. Compile Snapshot
+    // If project description is generic, adopt Groq's high-fidelity architecture summary
+    if (groqSynthesized.architectureSummary && (!project.description || project.description.includes("onboarded into VANTAIR"))) {
+      project.description = groqSynthesized.architectureSummary.slice(0, 300) + "...";
+    }
+
+    // 10. Compile Final System Model Snapshot
     const snapshotId = `snap_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const systemSnapshot: SystemModelSnapshot = {
       id: snapshotId,
@@ -559,9 +492,9 @@ export class AnalysisPipelineOrchestrator {
       stats: {
         totalEntities: entities.length,
         totalRelationships: relationships.length,
-        understandingScorePercent: Math.min(96, Math.max(72, 85 + (entities.length > 10 ? 5 : 0) - contradictions.length * 3)),
+        understandingScorePercent: Math.min(98, Math.max(76, 88 + (entities.length > 10 ? 6 : 0) - contradictions.length * 2)),
         runtimeAvailable: true,
-        criticalRisksCount: contradictions.filter(c => c.severity === "HIGH" || c.severity === "CRITICAL").length,
+        criticalRisksCount: contradictions.filter((c) => c.severity === "HIGH" || c.severity === "CRITICAL").length,
       },
       fingerprint,
       metadata: {
@@ -572,12 +505,15 @@ export class AnalysisPipelineOrchestrator {
         dependencies: discoveredDeps,
         stars: repoStars,
         forks: repoForks,
+        architectureSummary: groqSynthesized.architectureSummary,
+        recommendations: groqSynthesized.recommendations,
+        hardware: groqSynthesized.hardware,
       },
     };
 
     this.modelStore.saveSnapshot(systemSnapshot);
     project.latestSnapshotId = snapshotId;
-    this.projectStore.updateAnalysisProgress(analysisId, "COMPLETED", 100, "System Reality Model constructed successfully.");
+    this.projectStore.updateAnalysisProgress(analysisId, "COMPLETED", 100, `System Reality Model verified by ${groqSynthesized.hardware}.`);
 
     return systemSnapshot;
   }

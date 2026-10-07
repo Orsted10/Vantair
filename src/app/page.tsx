@@ -688,10 +688,22 @@ export default function VantairPlatformHome() {
                       repositoryContext={{
                         projectId: activeProjectId,
                         repoName: activeProject?.name,
-                        entities: snapshot?.entities?.slice(0, 15).map((e) => e.name),
+                        description: activeProject?.description,
+                        entities: snapshot?.entities?.slice(0, 25).map((e) => ({
+                          name: e.name,
+                          filePath: e.filePath,
+                          kind: e.kind,
+                        })),
                         contradictions: snapshot?.contradictions?.map((c) => c.title),
                         unknowns: snapshot?.unknowns?.map((u) => u.title),
                         invariants: snapshot?.invariants?.map((i) => i.statement),
+                        contracts: snapshot?.contracts?.map((c) => ({
+                          endpoint: c.endpointOrMethod,
+                          specLocation: c.specLocation,
+                        })),
+                        dependencies: snapshot?.metadata?.dependencies,
+                        architectureSummary: snapshot?.metadata?.architectureSummary,
+                        recommendations: snapshot?.metadata?.recommendations,
                       }}
                       onOpenEvidence={(claim) => handleOpenEvidence(claim)}
                       onRunSimulation={(scenario) => {

@@ -71,22 +71,49 @@ export async function POST(request: NextRequest) {
       }
 
       if (repoBase && fs.existsSync(repoBase)) {
-        const candidateFiles = [
-          "src/lib/groq.ts",
-          "src/app/api/ai/quest/route.ts",
-          "src/app/api/ai/generate/route.ts",
-          "src/app/api/verify/route.ts",
-          "src/app/page.tsx",
-          "package.json",
-        ];
+        const candidateFiles: string[] = [];
 
+        // 1. Gather file paths from snapshot entities
+        if (snapshot?.entities) {
+          for (const ent of snapshot.entities) {
+            if (ent.filePath && !candidateFiles.includes(ent.filePath)) {
+              candidateFiles.push(ent.filePath);
+              if (candidateFiles.length >= 8) break;
+            }
+          }
+        }
+
+        // 2. Discover key files on disk if list is still small
+        if (candidateFiles.length < 5) {
+          try {
+            const walkDisk = (dir: string, depth: number = 0) => {
+              if (depth > 2 || candidateFiles.length >= 12) return;
+              const entries = fs.readdirSync(dir, { withFileTypes: true });
+              for (const e of entries) {
+                if (e.name.startsWith(".") || e.name === "node_modules" || e.name === "dist" || e.name === "build") continue;
+                const full = path.join(dir, e.name);
+                const rel = path.relative(repoBase, full).replace(/\\/g, "/");
+                if (e.isDirectory()) {
+                  walkDisk(full, depth + 1);
+                } else if (e.isFile() && /\.(ts|js|tsx|jsx|py|go|rs|json)$/i.test(e.name)) {
+                  if (!candidateFiles.includes(rel)) {
+                    candidateFiles.push(rel);
+                  }
+                }
+              }
+            };
+            walkDisk(repoBase);
+          } catch {}
+        }
+
+        // 3. Read actual lines of code from discovered files
         for (const relFile of candidateFiles) {
           const full = path.join(repoBase, relFile);
           if (fs.existsSync(full) && fs.statSync(full).isFile()) {
             try {
-              const lines = fs.readFileSync(full, "utf-8").split("\n").slice(0, 45).join("\n");
+              const lines = fs.readFileSync(full, "utf-8").split("\n").slice(0, 55).join("\n");
               codeExcerpts += `\n--- File: ${relFile} ---\n${lines}\n`;
-              if (codeExcerpts.length > 3000) break;
+              if (codeExcerpts.length > 8000) break;
             } catch {}
           }
         }

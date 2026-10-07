@@ -53,10 +53,10 @@ export const CodeBrowserPanel: React.FC<CodeBrowserPanelProps> = ({
   onOpenEvidence,
 }) => {
   const [activeTab, setActiveTab] = useState<"repo" | "graph" | "search" | "blame" | "history">("repo");
-  const [selectedFile, setSelectedFile] = useState<string>("src/app/page.tsx");
+  const [selectedFile, setSelectedFile] = useState<string>("");
   const [fileContent, setFileContent] = useState<string>("");
   const [rawFiles, setRawFiles] = useState<FileItem[]>([]);
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(["src", "src/app", "src/lib", "src/components", "src/app/api"]));
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(["src", "src/app", "src/lib", "src/components", "src/app/api", "lib", "services"]));
   const [searchFilter, setSearchFilter] = useState<string>("");
   const [selectedLine, setSelectedLine] = useState<number | null>(1);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -74,13 +74,14 @@ export const CodeBrowserPanel: React.FC<CodeBrowserPanelProps> = ({
         if (data.status === "SUCCESS" && data.files?.length > 0) {
           setRawFiles(data.files);
 
-          // Find first primary source code file in src or app
+          // Find first primary source code file in src, lib, or services
           const preferredFile =
-            data.files.find((f: FileItem) => !f.isDir && /\.(tsx|ts|jsx|js|py|rs|go)$/.test(f.name) && (f.path.includes("src/") || f.path.includes("app/") || f.path.includes("lib/"))) ||
+            data.files.find((f: FileItem) => !f.isDir && /\.(tsx|ts|jsx|js|py|rs|go)$/.test(f.name) && (f.path.includes("src/") || f.path.includes("app/") || f.path.includes("lib/") || f.path.includes("services/"))) ||
             data.files.find((f: FileItem) => !f.isDir && /\.(tsx|ts|jsx|js|py|rs|go)$/.test(f.name)) ||
             data.files.find((f: FileItem) => !f.isDir && /\.(json|md|txt)$/.test(f.name));
 
           if (preferredFile) {
+            setSelectedFile(preferredFile.path);
             loadFileContent(preferredFile.path);
             // Auto expand parent directories
             const parts = preferredFile.path.split("/");
